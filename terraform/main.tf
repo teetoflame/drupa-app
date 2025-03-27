@@ -1,6 +1,5 @@
 provider "aws" {
   region  = var.aws_region
-  profile = "default"
 }
 
 # VPC
@@ -33,7 +32,7 @@ resource "aws_internet_gateway" "drupal_igw" {
   vpc_id = aws_vpc.drupal_vpc.id
 }
 
-# Route Table for Public Subnets
+# Public Route Table
 resource "aws_route_table" "public_rt" {
   vpc_id = aws_vpc.drupal_vpc.id
 
@@ -94,7 +93,7 @@ resource "aws_instance" "staging_instance" {
   subnet_id              = aws_subnet.public_subnets[0].id
   vpc_security_group_ids = [aws_security_group.drupal_sg.id]
   
-  associate_public_ip_address = true # Ensure it gets a public IP
+  associate_public_ip_address = true
 
   tags = {
     Name = "Drupal-Staging"
@@ -108,11 +107,11 @@ resource "aws_instance" "staging_instance" {
 # RDS Database
 resource "aws_db_instance" "drupal_db" {
   allocated_storage      = var.db_allocated_storage
-  engine                = "mysql"
-  instance_class        = var.db_instance_class
-  db_name               = var.db_name
-  username             = var.db_username
-  password             = var.db_password
+  engine                 = "mysql"
+  instance_class         = var.db_instance_class
+  db_name                = var.db_name
+  username               = var.db_username
+  password               = var.db_password
   vpc_security_group_ids = [aws_security_group.drupal_sg.id]
   db_subnet_group_name   = aws_db_subnet_group.drupal_db_subnet.name
   skip_final_snapshot    = true
@@ -129,12 +128,12 @@ resource "aws_lb" "drupal_alb" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.drupal_sg.id]
-  subnets           = aws_subnet.public_subnets[*].id
+  subnets            = aws_subnet.public_subnets[*].id
 }
 
 resource "aws_lb_target_group" "drupal_tg" {
   name     = var.target_group_name
-  port     = 80 # Ensure the instance listens on port 80
+  port     = 80
   protocol = "HTTP"
   vpc_id   = aws_vpc.drupal_vpc.id
 }
