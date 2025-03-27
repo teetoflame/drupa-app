@@ -1,0 +1,12 @@
+# vars.yml
+drupal_db_name: "drupaldb"
+drupal_db_user: "drupaluser"
+drupal_db_password: "securepassword"
+drupal_version: "10"
+mysql_root_password: "rootpassword"
+mysql_container_name: "drupal-mysql"
+drupal_container_name: "drupal-app"
+mysql_volume: "drupal_db_data"
+drupal_volume: "drupal_site_data"
+docker_network: "drupal_network"
+drupal_port: "5050"
