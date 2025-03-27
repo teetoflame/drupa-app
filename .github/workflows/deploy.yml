@@ -27,19 +27,31 @@ jobs:
         run: terraform init
         working-directory: ./terraform
 
-      - name: Validate Terraform Configuration
-        run: terraform validate
+      - name: Destroy Terraform Resources (If Exist)
+        run: terraform destroy -auto-approve || echo "No existing resources to destroy"
+        working-directory: ./terraform
+
+      - name: Wait Until Resources Are Deleted
+        run: |
+          echo "Waiting for VPC to be fully deleted..."
+          while [[ $(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=drupal-vpc" --query "Vpcs" --output json) != "[]" ]]; do
+            echo "VPC still exists, waiting..."
+            sleep 30
+          done
+          echo "All resources deleted. Proceeding with re-creation."
         working-directory: ./terraform
 
       - name: Apply Terraform Configuration
         run: terraform apply -auto-approve
         working-directory: ./terraform
 
+      - name: Wait for EC2 Instances to be Ready
+        run: sleep 30  # Allow EC2 instances to initialize
+
       - name: Get New EC2 Instance IPs
         run: |
           echo "[webservers]" > ansible/inventory.ini
-          terraform -chdir=terraform output -json public_ips | jq -r '.[] | "server ansible_host=\(.) ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa"' >> ansible/inventory.ini
-
+          terraform -chdir=terraform output -json public_ips | jq -r '.[] | "\(. ) ansible_host=\(.) ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa"' >> ansible/inventory.ini
       - name: Commit Updated Inventory File
         run: |
           git config --global user.email "github-actions@github.com"
@@ -68,9 +80,11 @@ jobs:
           eval "$(ssh-agent -s)"
           ssh-add ~/.ssh/id_rsa
 
-      - name: Verify SSH Access
+      - name: Wait for SSH Access (Retry if Necessary)
         run: |
-          ansible all -i ansible/inventory.ini -m ping
+          for i in {1..10}; do
+            ansible all -i ansible/inventory.ini -m ping && break || sleep 10
+          done
 
       - name: Run Ansible Playbook
         run: ansible-playbook -i ansible/inventory.ini ansible/setup.yml
