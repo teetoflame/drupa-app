@@ -167,3 +167,7 @@ resource "aws_instance" "staging_instance" {
     volume_size = var.ebs_volume_size
   }
 }
+
+output "public_ips" {
+  value = aws_instance.app[*].public_ip
+}
