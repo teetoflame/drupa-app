@@ -18,17 +18,20 @@ jobs:
 
       - name: Initialize Terraform
         run: terraform init
+        working-directory: ./terraform  # Ensure Terraform runs in the correct directory
 
       - name: Destroy Existing Infrastructure
         run: terraform destroy -auto-approve
+        working-directory: ./terraform
 
       - name: Apply Terraform Configuration
         run: terraform apply -auto-approve
+        working-directory: ./terraform
 
       - name: Get New EC2 Instance IPs
         run: |
           echo "[webservers]" > ansible/inventory.ini
-          terraform output -json public_ips | jq -r '.[] | "server ansible_host=\(.) ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/your-key.pem"' >> ansible/inventory.ini
+          terraform -chdir=terraform output -json public_ips | jq -r '.[] | "server ansible_host=\(.) ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa"' >> ansible/inventory.ini
 
       - name: Commit Updated Inventory File
         run: |
@@ -48,6 +51,12 @@ jobs:
 
       - name: Install Ansible
         run: sudo apt update && sudo apt install -y ansible
+
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
 
       - name: Run Ansible Playbook
         run: ansible-playbook -i ansible/inventory.ini ansible/setup.yml
