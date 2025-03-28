@@ -101,6 +101,10 @@ resource "aws_lb_target_group" "drupal_tg" {
   port     = 80
   protocol = "HTTP"
   vpc_id   = aws_vpc.drupal_vpc.id
+
+  lifecycle {
+    create_before_destroy = true  # Ensure a new target group is created before deleting the old one
+  }
 }
 
 resource "aws_lb_listener" "http" {
@@ -115,17 +119,6 @@ resource "aws_lb_listener" "http" {
 
   lifecycle {
     prevent_destroy = false  # Allow Terraform to destroy it when needed
-  }
-}
-
-resource "aws_lb_target_group" "drupal_tg" {
-  name     = var.target_group_name
-  port     = 80
-  protocol = "HTTP"
-  vpc_id   = aws_vpc.drupal_vpc.id
-
-  lifecycle {
-    create_before_destroy = true  # Ensure a new target group is created before deleting the old one
   }
 }
 
