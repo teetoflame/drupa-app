@@ -31,9 +31,14 @@ jobs:
         run: |
           echo "Checking if DB Subnet Group exists..."
           if aws rds describe-db-subnet-groups --db-subnet-group-name drupal-db-subnet &> /dev/null; then
-            echo "Deleting existing DB Subnet Group..."
-            aws rds delete-db-subnet-group --db-subnet-group-name drupal-db-subnet
-            sleep 30  # Wait for deletion
+            DB_IN_USE=$(aws rds describe-db-instances --query 'DBInstances[*].DBSubnetGroup.DBSubnetGroupName' --output text | grep -w "drupal-db-subnet" || echo "NOT_IN_USE")
+            if [[ "$DB_IN_USE" != "NOT_IN_USE" ]]; then
+              echo "DB Subnet Group is in use by an RDS instance. Skipping deletion."
+            else
+              echo "Deleting existing DB Subnet Group..."
+              aws rds delete-db-subnet-group --db-subnet-group-name drupal-db-subnet
+              sleep 30  # Wait for deletion
+            fi
           else
             echo "DB Subnet Group does not exist. Skipping..."
           fi
