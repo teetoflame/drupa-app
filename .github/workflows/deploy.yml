@@ -1,3 +1,32 @@
+name: Deploy Drupal with Terraform and Ansible
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  terraform:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Set Up Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Initialize Terraform
+        run: terraform init
+        working-directory: ./terraform
+
       - name: Remove Existing AWS Resources if Needed
         run: |
           echo "Checking if DB Subnet Group exists..."
@@ -50,3 +79,66 @@
             echo "Target Group does not exist. Skipping..."
           fi
         working-directory: ./terraform
+
+      - name: Apply Terraform Configuration
+        run: terraform apply -auto-approve
+        working-directory: ./terraform
+
+      - name: Wait for EC2 Instances to be Ready
+        run: sleep 30  # Allow EC2 instances to initialize
+
+      - name: Get New EC2 Instance IPs
+        run: |
+          echo "[webservers]" > ansible/inventory.ini
+          
+          # Capture Terraform output
+          PUBLIC_IPS=$(terraform -chdir=terraform output -json public_ips 2>/dev/null)
+
+          # Check if the output is empty or invalid
+          if [[ -z "$PUBLIC_IPS" || "$PUBLIC_IPS" == "null" || "$PUBLIC_IPS" == "[]" ]]; then
+            echo "Error: No public IPs found from Terraform output. Exiting..."
+            exit 1
+          fi
+
+          # Convert JSON array to Ansible inventory format
+          echo "$PUBLIC_IPS" | jq -r '.[] | " \(. ) ansible_host=\(.) ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa"' >> ansible/inventory.ini
+
+          echo "Generated ansible/inventory.ini:"
+          cat ansible/inventory.ini
+          
+      - name: Commit Updated Inventory File
+        run: |
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "GitHub Actions"
+          git add ansible/inventory.ini
+          git commit -m "Updated inventory.ini with new EC2 IPs" || echo "No changes to commit"
+          git push || echo "No changes to push"
+
+  ansible:
+    name: Configure Servers & Deploy Drupal
+    needs: terraform
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Install Ansible
+        run: sudo apt update && sudo apt install -y ansible
+
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/id_rsa
+
+      - name: Wait for SSH Access (Retry if Necessary)
+        run: |
+          for i in {1..10}; do
+            ansible all -i ansible/inventory.ini -m ping && break || sleep 10
+          done
+
+      - name: Run Ansible Playbook
+        run: ansible-playbook -i ansible/inventory.ini ansible/setup.yml
