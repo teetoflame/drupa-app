@@ -27,18 +27,26 @@ jobs:
         run: terraform init
         working-directory: ./terraform
 
-      - name: Destroy Terraform Resources (If Exist)
-        run: terraform destroy -auto-approve || echo "No existing resources to destroy"
-        working-directory: ./terraform
-
-      - name: Wait Until Resources Are Deleted
+      - name: Remove Existing AWS Resources if Needed
         run: |
-          echo "Waiting for VPC to be fully deleted..."
-          while [[ $(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=drupal-vpc" --query "Vpcs" --output json) != "[]" ]]; do
-            echo "VPC still exists, waiting..."
-            sleep 30
-          done
-          echo "All resources deleted. Proceeding with re-creation."
+          echo "Checking if DB Subnet Group exists..."
+          if aws rds describe-db-subnet-groups --db-subnet-group-name drupal-db-subnet &> /dev/null; then
+            echo "Deleting existing DB Subnet Group..."
+            aws rds delete-db-subnet-group --db-subnet-group-name drupal-db-subnet
+            sleep 30  # Wait for deletion
+          else
+            echo "DB Subnet Group does not exist. Skipping..."
+          fi
+
+          echo "Checking if Target Group exists..."
+          TARGET_GROUP_ARN=$(aws elbv2 describe-target-groups --names drupal-tg --query "TargetGroups[0].TargetGroupArn" --output text 2>/dev/null || echo "NOT_FOUND")
+          if [[ "$TARGET_GROUP_ARN" != "NOT_FOUND" ]]; then
+            echo "Deleting existing Target Group..."
+            aws elbv2 delete-target-group --target-group-arn "$TARGET_GROUP_ARN"
+            sleep 30  # Wait for deletion
+          else
+            echo "Target Group does not exist. Skipping..."
+          fi
         working-directory: ./terraform
 
       - name: Apply Terraform Configuration
