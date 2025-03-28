@@ -59,7 +59,22 @@ jobs:
       - name: Get New EC2 Instance IPs
         run: |
           echo "[webservers]" > ansible/inventory.ini
-          terraform -chdir=terraform output -json public_ips | jq -r '.[] | "\(. ) ansible_host=\(.) ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa"' >> ansible/inventory.ini
+          
+          # Capture Terraform output
+          PUBLIC_IPS=$(terraform -chdir=terraform output -json public_ips 2>/dev/null)
+
+          # Check if the output is empty or invalid
+          if [[ -z "$PUBLIC_IPS" || "$PUBLIC_IPS" == "null" || "$PUBLIC_IPS" == "[]" ]]; then
+            echo "Error: No public IPs found from Terraform output. Exiting..."
+            exit 1
+          fi
+
+          # Convert JSON array to Ansible inventory format
+          echo "$PUBLIC_IPS" | jq -r '.[] | " \(. ) ansible_host=\(.) ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa"' >> ansible/inventory.ini
+
+          echo "Generated ansible/inventory.ini:"
+          cat ansible/inventory.ini
+          
       - name: Commit Updated Inventory File
         run: |
           git config --global user.email "github-actions@github.com"
