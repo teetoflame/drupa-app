@@ -45,12 +45,19 @@ jobs:
 
           echo "Checking if Target Group exists..."
           TARGET_GROUP_ARN=$(aws elbv2 describe-target-groups --names drupal-tg --query "TargetGroups[0].TargetGroupArn" --output text 2>/dev/null || echo "NOT_FOUND")
-          
-          if [[ "$TARGET_GROUP_ARN" != "NOT_FOUND" ]]; then
-            echo "Target Group is in use. Deregistering from ALB listeners..."
 
-            # Find ALB listener using this Target Group
-            LISTENERS=$(aws elbv2 describe-listeners --query "Listeners[*].ListenerArn" --output text)
+          if [[ "$TARGET_GROUP_ARN" != "NOT_FOUND" ]]; then
+            echo "Target Group is in use. Retrieving Load Balancer ARN..."
+            LOAD_BALANCER_ARN=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?contains(DNSName, 'drupal')].LoadBalancerArn" --output text 2>/dev/null || echo "NOT_FOUND")
+
+            if [[ "$LOAD_BALANCER_ARN" == "NOT_FOUND" ]]; then
+              echo "Error: No Load Balancer found. Skipping Target Group deletion."
+              exit 0
+            fi
+
+            echo "Fetching listeners for Load Balancer..."
+            LISTENERS=$(aws elbv2 describe-listeners --load-balancer-arn "$LOAD_BALANCER_ARN" --query "Listeners[*].ListenerArn" --output text)
+
             for LISTENER_ARN in $LISTENERS; do
               RULES=$(aws elbv2 describe-rules --listener-arn "$LISTENER_ARN" --query "Rules[*].RuleArn" --output text)
               for RULE_ARN in $RULES; do
@@ -62,7 +69,6 @@ jobs:
               done
             done
 
-            # Delete listener if it uses this Target Group
             for LISTENER_ARN in $LISTENERS; do
               TG_IN_LISTENER=$(aws elbv2 describe-listeners --listener-arn "$LISTENER_ARN" --query "Listeners[*].DefaultActions[*].TargetGroupArn" --output text | grep -q "$TARGET_GROUP_ARN" && echo "IN_USE" || echo "NOT_IN_USE")
               if [[ "$TG_IN_LISTENER" == "IN_USE" ]]; then
