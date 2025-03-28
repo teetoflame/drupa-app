@@ -27,62 +27,19 @@ jobs:
         run: terraform init
         working-directory: ./terraform
 
-      - name: Remove Existing AWS Resources if Needed
+      - name: Import Existing Resources into Terraform
         run: |
-          echo "Checking if DB Subnet Group exists..."
+          # Import DB Subnet Group if it exists
           if aws rds describe-db-subnet-groups --db-subnet-group-name drupal-db-subnet &> /dev/null; then
-            DB_IN_USE=$(aws rds describe-db-instances --query 'DBInstances[*].DBSubnetGroup.DBSubnetGroupName' --output text | grep -w "drupal-db-subnet" || echo "NOT_IN_USE")
-            if [[ "$DB_IN_USE" != "NOT_IN_USE" ]]; then
-              echo "DB Subnet Group is in use by an RDS instance. Skipping deletion."
-            else
-              echo "Deleting existing DB Subnet Group..."
-              aws rds delete-db-subnet-group --db-subnet-group-name drupal-db-subnet
-              sleep 30  # Wait for deletion
-            fi
-          else
-            echo "DB Subnet Group does not exist. Skipping..."
+            echo "Importing existing DB Subnet Group into Terraform..."
+            terraform import aws_db_subnet_group.drupal_db_subnet drupal-db-subnet
           fi
 
-          echo "Checking if Target Group exists..."
+          # Import Target Group if it exists
           TARGET_GROUP_ARN=$(aws elbv2 describe-target-groups --names drupal-tg --query "TargetGroups[0].TargetGroupArn" --output text 2>/dev/null || echo "NOT_FOUND")
-
           if [[ "$TARGET_GROUP_ARN" != "NOT_FOUND" ]]; then
-            echo "Target Group is in use. Retrieving Load Balancer ARN..."
-            LOAD_BALANCER_ARN=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?contains(DNSName, 'drupal')].LoadBalancerArn" --output text 2>/dev/null || echo "NOT_FOUND")
-
-            if [[ "$LOAD_BALANCER_ARN" == "NOT_FOUND" ]]; then
-              echo "Error: No Load Balancer found. Skipping Target Group deletion."
-              exit 0
-            fi
-
-            echo "Fetching listeners for Load Balancer..."
-            LISTENERS=$(aws elbv2 describe-listeners --load-balancer-arn "$LOAD_BALANCER_ARN" --query "Listeners[*].ListenerArn" --output text)
-
-            for LISTENER_ARN in $LISTENERS; do
-              RULES=$(aws elbv2 describe-rules --listener-arn "$LISTENER_ARN" --query "Rules[*].RuleArn" --output text)
-              for RULE_ARN in $RULES; do
-                if aws elbv2 describe-rules --rule-arns "$RULE_ARN" --query "Rules[*].Actions[*].TargetGroupArn" --output text | grep -q "$TARGET_GROUP_ARN"; then
-                  echo "Deleting rule $RULE_ARN associated with Target Group..."
-                  aws elbv2 delete-rule --rule-arn "$RULE_ARN"
-                  sleep 5
-                fi
-              done
-            done
-
-            for LISTENER_ARN in $LISTENERS; do
-              TG_IN_LISTENER=$(aws elbv2 describe-listeners --listener-arn "$LISTENER_ARN" --query "Listeners[*].DefaultActions[*].TargetGroupArn" --output text | grep -q "$TARGET_GROUP_ARN" && echo "IN_USE" || echo "NOT_IN_USE")
-              if [[ "$TG_IN_LISTENER" == "IN_USE" ]]; then
-                echo "Deleting listener $LISTENER_ARN associated with Target Group..."
-                aws elbv2 delete-listener --listener-arn "$LISTENER_ARN"
-                sleep 10
-              fi
-            done
-
-            echo "Deleting Target Group..."
-            aws elbv2 delete-target-group --target-group-arn "$TARGET_GROUP_ARN"
-            sleep 30  # Wait for deletion
-          else
-            echo "Target Group does not exist. Skipping..."
+            echo "Importing existing Target Group into Terraform..."
+            terraform import aws_lb_target_group.drupal_tg "$TARGET_GROUP_ARN"
           fi
         working-directory: ./terraform
 
@@ -97,16 +54,12 @@ jobs:
         run: |
           echo "[webservers]" > ansible/inventory.ini
           
-          # Capture Terraform output
           PUBLIC_IPS=$(terraform -chdir=terraform output -json public_ips 2>/dev/null)
-
-          # Check if the output is empty or invalid
           if [[ -z "$PUBLIC_IPS" || "$PUBLIC_IPS" == "null" || "$PUBLIC_IPS" == "[]" ]]; then
             echo "Error: No public IPs found from Terraform output. Exiting..."
             exit 1
           fi
 
-          # Convert JSON array to Ansible inventory format
           echo "$PUBLIC_IPS" | jq -r '.[] | " \(. ) ansible_host=\(.) ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa"' >> ansible/inventory.ini
 
           echo "Generated ansible/inventory.ini:"
