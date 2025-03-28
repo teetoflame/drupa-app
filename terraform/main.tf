@@ -1,5 +1,5 @@
 provider "aws" {
-  region  = var.aws_region
+  region = var.aws_region
 }
 
 # VPC
@@ -30,22 +30,6 @@ resource "aws_subnet" "private_subnets" {
 # Internet Gateway
 resource "aws_internet_gateway" "drupal_igw" {
   vpc_id = aws_vpc.drupal_vpc.id
-}
-
-# Public Route Table
-resource "aws_route_table" "public_rt" {
-  vpc_id = aws_vpc.drupal_vpc.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.drupal_igw.id
-  }
-}
-
-resource "aws_route_table_association" "public_assoc" {
-  count          = length(var.subnet_cidrs)
-  subnet_id      = aws_subnet.public_subnets[count.index].id
-  route_table_id = aws_route_table.public_rt.id
 }
 
 # Security Groups
@@ -79,25 +63,6 @@ resource "aws_instance" "drupal_instance" {
   subnet_id     = aws_subnet.public_subnets[count.index].id
 
   vpc_security_group_ids = [aws_security_group.drupal_sg.id]
-
-  root_block_device {
-    volume_size = var.ebs_volume_size
-  }
-}
-
-# Staging EC2 Instance
-resource "aws_instance" "staging_instance" {
-  ami                    = var.ec2_ami
-  instance_type          = var.ec2_instance_type
-  key_name               = var.key_name
-  subnet_id              = aws_subnet.public_subnets[0].id
-  vpc_security_group_ids = [aws_security_group.drupal_sg.id]
-  
-  associate_public_ip_address = true
-
-  tags = {
-    Name = "Drupal-Staging"
-  }
 
   root_block_device {
     volume_size = var.ebs_volume_size
@@ -149,24 +114,11 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-resource "aws_lb_target_group_attachment" "drupal_attach" {
-  count            = var.min_instance_count
-  target_group_arn = aws_lb_target_group.drupal_tg.arn
-  target_id        = aws_instance.drupal_instance[count.index].id
-  port             = 80  
-}
-
 # Output Values
 output "load_balancer_dns" {
   value = aws_lb.drupal_alb.dns_name
 }
 
 output "public_ips" {
-  description = "Public IP addresses of the Drupal EC2 instances"
-  value       = [for instance in aws_instance.drupal_instance : instance.public_ip]
-}
-
-output "staging_server_ip" {
-  description = "Public IP of the Staging Drupal EC2 instance"
-  value       = aws_instance.staging_instance.public_ip
+  value = aws_instance.drupal_instance[*].public_ip
 }
